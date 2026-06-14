@@ -12,48 +12,94 @@ export default function ChatDashboard() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target.result;
-      const rows = text.split('\n');
+      
+      // Robust CSV parser that handles newlines and semicolons inside quotes
+      const parseCSV = (csvText) => {
+        const lines = [];
+        let currentLine = [];
+        let currentField = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < csvText.length; i++) {
+          const char = csvText[i];
+          const nextChar = csvText[i + 1];
+
+          if (inQuotes) {
+            if (char === '"') {
+              if (nextChar === '"') {
+                // Escaped double quote
+                currentField += '"';
+                i++; // skip next quote
+              } else {
+                // End of quoted field
+                inQuotes = false;
+              }
+            } else {
+              currentField += char;
+            }
+          } else {
+            if (char === '"') {
+              inQuotes = true;
+            } else if (char === ';') {
+              currentLine.push(currentField);
+              currentField = '';
+            } else if (char === '\r') {
+              // Ignore carriage return
+            } else if (char === '\n') {
+              currentLine.push(currentField);
+              lines.push(currentLine);
+              currentLine = [];
+              currentField = '';
+            } else {
+              currentField += char;
+            }
+          }
+        }
+        if (currentField || currentLine.length > 0) {
+          currentLine.push(currentField);
+          lines.push(currentLine);
+        }
+        return lines;
+      };
+
+      const rows = parseCSV(text);
       const grouped = {};
 
       // Skip header row
       for (let i = 1; i < rows.length; i++) {
-        const line = rows[i].trim();
-        if (!line) continue;
+        const row = rows[i];
+        if (row.length < 5) continue;
 
-        // Extracting data based on your specific CSV structure (separated by ;)
-        const firstSemi = line.indexOf(';');
-        const secondSemi = line.indexOf(';', firstSemi + 1);
-        const thirdSemi = line.indexOf(';', secondSemi + 1);
-        const lastSemi = line.lastIndexOf(';');
+        const id = row[0].trim();
+        const user_id = row[1].trim();
+        const role = row[2].trim();
+        const content = row[3];
+        const created_at = row[4].trim();
 
-        if (firstSemi !== -1 && secondSemi !== -1 && thirdSemi !== -1 && lastSemi !== -1 && lastSemi !== thirdSemi) {
-          const id = line.substring(0, firstSemi);
-          const user_id = line.substring(firstSemi + 1, secondSemi);
-          const role = line.substring(secondSemi + 1, thirdSemi);
-          let content = line.substring(thirdSemi + 1, lastSemi);
-          const created_at = line.substring(lastSemi + 1);
+        if (!user_id || !role || !content) continue;
 
-          // Clean up quotes from content if exist
-          if (content.startsWith('"') && content.endsWith('"')) {
-            content = content.substring(1, content.length - 1);
-          }
-
-          if (!grouped[user_id]) {
-            grouped[user_id] = [];
-          }
-          grouped[user_id].push({ id, role, content, created_at });
+        if (!grouped[user_id]) {
+          grouped[user_id] = [];
         }
+        grouped[user_id].push({ id, role, content, created_at });
       }
 
-      // Time wise sort
+      // Time wise sort (ascending - oldest to newest)
       Object.keys(grouped).forEach(userId => {
         grouped[userId].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       });
 
       setChatData(grouped);
-      const users = Object.keys(grouped);
-      if (users.length > 0) {
-        setSelectedUser(users[0]);
+
+      // Select the user with the most recent activity first
+      const sortedUsers = Object.keys(grouped).sort((a, b) => {
+        const lastMsgA = grouped[a][grouped[a].length - 1];
+        const lastMsgB = grouped[b][grouped[b].length - 1];
+        return new Date(lastMsgB.created_at) - new Date(lastMsgA.created_at);
+      });
+
+      if (sortedUsers.length > 0) {
+        setSelectedUser(sortedUsers[0]);
       }
     };
     reader.readAsText(file);
@@ -63,6 +109,12 @@ export default function ChatDashboard() {
     const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
     return new Date(dateString).toLocaleDateString('en-US', options);
   };
+
+  const sortedUserIds = Object.keys(chatData).sort((a, b) => {
+    const lastMsgA = chatData[a][chatData[a].length - 1];
+    const lastMsgB = chatData[b][chatData[b].length - 1];
+    return new Date(lastMsgB.created_at) - new Date(lastMsgA.created_at);
+  });
 
   return (
     <div className="min-h-screen bg-[#0a0f1c] text-white p-6 font-sans">
@@ -101,7 +153,7 @@ export default function ChatDashboard() {
                 User IDs
               </h2>
               <div className="space-y-2">
-                {Object.keys(chatData).map((userId) => (
+                {sortedUserIds.map((userId) => (
                   <button
                     key={userId}
                     onClick={() => setSelectedUser(userId)}
@@ -137,7 +189,7 @@ export default function ChatDashboard() {
                         <Clock size={12} className="text-slate-500" />
                         <span className="text-[10px] text-slate-500">{formatDate(msg.created_at)}</span>
                       </div>
-                      <div className={`max-w-[80%] px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-md ${
+                      <div className={`max-w-[80%] px-5 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-md ${
                         isUser 
                           ? 'bg-gradient-to-br from-cyan-600/90 to-blue-700/90 text-white rounded-tr-sm' 
                           : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-tl-sm'
